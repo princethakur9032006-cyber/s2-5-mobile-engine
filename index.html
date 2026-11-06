@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#101827">
+<title>S2.5 Mobile Short Engine</title>
+<style>
+:root{color-scheme:dark;--bg:#101827;--panel:#182438;--line:#30415b;--accent:#ff8a45;--text:#f4f7fb;--muted:#a9b6c8}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,Arial,sans-serif}
+header{padding:14px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#101827ee;z-index:4}
+h1{font-size:17px;margin:0 0 4px}header p{margin:0;color:var(--muted);font-size:12px}
+main{max-width:900px;margin:auto;padding:12px;display:grid;gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px}
+h2{font-size:14px;margin:0 0 10px}
+#stage{width:100%;aspect-ratio:9/16;max-height:68vh;background:#8bc5ed;border-radius:10px;overflow:hidden;position:relative}
+#stage canvas{width:100%;height:100%;display:block}
+#caption{position:absolute;left:6%;right:6%;bottom:8%;font-weight:900;text-align:center;font-size:clamp(17px,4.5vw,27px);line-height:1.08;color:white;text-shadow:2px 3px 0 #111, -1px -1px 0 #111,1px -1px 0 #111,-1px 1px 0 #111}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+button,.filebtn{border:0;border-radius:10px;background:var(--accent);color:#20150e;font-weight:800;padding:11px 14px;min-height:42px}
+button.secondary,.filebtn.secondary{background:#2a3b54;color:var(--text);border:1px solid #435875}
+button:disabled{opacity:.45}
+label{display:block;color:var(--muted);font-size:12px;margin:8px 0 5px}
+input,textarea,select{width:100%;background:#0f1928;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px;font:13px system-ui}
+textarea{min-height:160px;resize:vertical;line-height:1.4}
+.small{color:var(--muted);font-size:12px;line-height:1.45}
+.status{padding:9px 10px;border-radius:8px;background:#0f1928;color:#cbd7e7;font-size:12px;min-height:35px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+a{color:#ffb27f}
+@media(min-width:720px){main{grid-template-columns:minmax(280px,420px) 1fr;align-items:start} .preview{position:sticky;top:82px}}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js"}}
+</script>
+</head>
+<body>
+<header><h1>S2.5 · Mobile 2.5D Short Engine</h1><p>Browser renderer · Three.js · no API key or paid backend</p></header>
+<main>
+<section class="panel preview">
+  <h2>Live scene preview · 9:16</h2>
+  <div id="stage"><div id="caption"></div></div>
+  <div class="controls" style="margin-top:10px">
+    <button id="play">▶ Preview</button>
+    <button id="record">● Render WebM</button>
+    <button id="stop" class="secondary" disabled>Stop</button>
+  </div>
+  <p class="small">Rendering records the live 3D canvas. Keep this tab open and prevent the phone from sleeping.</p>
+</section>
+<section style="display:grid;gap:12px">
+  <div class="panel">
+    <h2>1. Story / scene plan</h2>
+    <label for="storyTitle">Video title</label>
+    <input id="storyTitle" value="The Window Tax — 1696">
+    <label for="plan">Scene plan JSON (Claude can generate this)</label>
+    <textarea id="plan" spellcheck="false"></textarea>
+    <div class="controls" style="margin-top:8px">
+      <button id="loadPlan" class="secondary">Load scene plan</button>
+      <button id="downloadPlan" class="secondary">Download JSON</button>
+    </div>
+    <p class="small">Use the included CLAUDE_PROMPT.txt to ask Claude for scene plans in this engine's format. Claude Free can generate the plan; this page performs the rendering locally in your browser.</p>
+  </div>
+  <div class="panel">
+    <h2>2. Narration audio (optional)</h2>
+    <input id="audioFile" type="file" accept="audio/*">
+    <p class="small">Add a narration file. The renderer attempts to mix it into the WebM recording. Audio capture support varies by Android browser.</p>
+  </div>
+  <div class="panel">
+    <h2>3. Export</h2>
+    <div class="grid2">
+      <div><label for="fps">Frame rate</label><select id="fps"><option>24</option><option selected>30</option></select></div>
+      <div><label for="quality">Recording quality</label><select id="quality"><option value="2500000">Standard</option><option value="4500000">High</option></select></div>
+    </div>
+    <div id="status" class="status" style="margin-top:10px">Ready. Load a plan or use the included example.</div>
+    <a id="download" style="display:none;display:block;margin-top:10px"></a>
+  </div>
+  <div class="panel">
+    <h2>Known MVP limits</h2>
+    <p class="small">This is a working starter renderer, not a full clone of the tutorial's proprietary setup. It builds procedural 3D sets and simple 2D-like cartoon characters. It does not yet create sophisticated character rigs, AI-generated textures, automatic voice synthesis, or guaranteed MP4 output. Android Chrome usually records WebM; convert it to MP4 in Canva if needed. Three.js is loaded from a free public CDN, so the first load requires internet.</p>
+  </div>
+</section>
+</main>
+<script type="module">
+import * as THREE from 'three';
+
+const stage=document.getElementById('stage'), captionEl=document.getElementById('caption');
+const statusEl=document.getElementById('status'), planEl=document.getElementById('plan');
+const setStatus=t=>statusEl.textContent=t;
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5));
+renderer.setSize(540,960,false);
+renderer.setClearColor(0x8cc9f2);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+stage.prepend(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x83c5f4);scene.fog=new THREE.Fog(0x83c5f4,24,65);
+const camera=new THREE.PerspectiveCamera(37,9/16,.1,100);camera.position.set(8,7,15);camera.lookAt(0,3,0);
+scene.add(new THREE.HemisphereLight(0xd8efff,0x655044,2.0));
+const sun=new THREE.DirectionalLight(0xffe0ad,3.1);sun.position.set(-7,12,8);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);scene.add(sun);
+const mat=(c,rough=.85)=>new THREE.MeshStandardMaterial({color:c,roughness:rough});
+const M={brick:mat(0xb94e32),brick2:mat(0x8e3928),cream:mat(0xe6c99b),roof:mat(0x963b27),wood:mat(0x553323),glass:mat(0x397da5,.35),stone:mat(0x7d7770),dark:mat(0x24252b),orange:mat(0xb94c24),teal:mat(0x267f82),white:mat(0xf6f2e9),skin:mat(0xf7f4ed),gold:mat(0xd6a13d),brown:mat(0x463126),green:mat(0x597b4e)};
+function box(parent,w,h,d,material,x,y,z){let o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o}
+function sphere(parent,r,material,x,y,z){let o=new THREE.Mesh(new THREE.SphereGeometry(r,20,16),material);o.position.set(x,y,z);o.castShadow=true;parent.add(o);return o}
+function cylinder(parent,rt,rb,h,material,x,y,z){let o=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,8),material);o.position.set(x,y,z);o.castShadow=true;parent.add(o);return o}
+let character,armPivot,brickObj,windowGroup,sceneObjects=[];
+function clearWorld(){for(const o of sceneObjects)scene.remove(o);sceneObjects=[];character=null}
+function addWorld(o){scene.add(o);sceneObjects.push(o);return o}
+function makeHouse(){
+ const g=new THREE.Group();addWorld(g);
+ box(g,9,10,1.1,M.brick,1,5,-2);
+ box(g,9.3,.35,1.3,M.cream,1,10.15,-2);
+ // roof silhouette
+ let roof= new THREE.Mesh(new THREE.ConeGeometry(6.2,3.5,4),M.roof);roof.rotation.y=Math.PI/4;roof.scale.set(1,.75,.35);roof.position.set(1,11.5,-2);roof.castShadow=true;g.add(roof);
+ // windows: 3 columns x 3 rows, front-facing
+ windowGroup=new THREE.Group();g.add(windowGroup);
+ for(let row=0;row<3;row++)for(let col=0;col<3;col++){
+  let x=-1.8+col*2.8,y=2.1+row*2.6;
+  box(windowGroup,.98,1.55,.12,M.wood,x,y,-1.36);
+  box(windowGroup,.78,1.34,.05,M.glass,x,y,-1.27);
+  box(windowGroup,.07,1.38,.04,M.cream,x,y,-1.22);
+  box(windowGroup,.82,.07,.04,M.cream,x,y,-1.21);
+  box(windowGroup,.06,1.36,.05,M.wood,x,y,-1.17);
+  box(windowGroup,.84,.06,.05,M.wood,x,y,-1.17);
+ }
+ box(g,1.5,2.4,.16,M.wood,1,.0,-1.25);
+ box(g,1.8,.2,.35,M.cream,1,1.25,-1.18);
+ // side houses
+ for(let i=0;i<3;i++){box(g,3.4,5+i*.5,3,M.cream,-6-i*3,2.5,-5);box(g,3.6,.7,3.2,M.roof,-6-i*3,5.2+i*.5,-5)}
+ return g;
+}
+function makeStreet(){
+ let g=new THREE.Group();addWorld(g);
+ box(g,42,.4,42,mat(0x6c665e),0,-.35,-5);
+ // cobbles
+ const cobbleMat=[mat(0x91877b),mat(0x766f68),mat(0xa39787)];
+ for(let z=7;z>-22;z-=1.05)for(let x=-14;x<15;x+=1.15){
+  let c=new THREE.Mesh(new THREE.BoxGeometry(.92,.16,.72),cobbleMat[(Math.abs(Math.floor(x+z))%3)]);c.position.set(x,-.08,z);c.rotation.y=(Math.floor(x*3+z)%2)*.12;c.receiveShadow=true;g.add(c);
+ }
+ // distant sky clouds
+ for(let i=0;i<7;i++){let cl=new THREE.Group();for(let j=0;j<4;j++)sphere(cl,.55,mat(0xffffff),j*.55,Math.sin(j)*.18,0);cl.position.set(-9+i*3.2,10+(i%3),-17);g.add(cl)}
+ return g;
+}
+function makeCharacter(){
+ let c=new THREE.Group();addWorld(c);
+ // stick body, round head, coat and limbs
+ sphere(c,.85,M.skin,0,5.5,0);
+ // face dots and mouth on front (-z)
+ sphere(c,.075,M.dark,-.28,5.62,-.76);sphere(c,.075,M.dark,.28,5.62,-.76);
+ box(c,.23,.045,.04,M.dark,0,5.28,-.79);
+ box(c,.95,1.45,M.orange,0,3.9,0);
+ box(c,.63,.85,M.teal,0,4.05,-.51);
+ box(c,.18,.16,M.cream,0,4.75,-.52);
+ // legs
+ cylinder(c,.09,.12,1.35,M.dark,-.28,2.65,0);cylinder(c,.09,.12,1.35,M.dark,.28,2.65,0);
+ box(c,.42,.18,.62,M.dark,-.28,1.92,-.12);box(c,.42,.18,.62,M.dark,.28,1.92,-.12);
+ // arms
+ let left=new THREE.Group();left.position.set(-.55,4.55,0);c.add(left);cylinder(left,.075,.075,1.45,M.dark,0,-.55,0);sphere(left,.13,M.skin,0,-1.28,-.02);
+ armPivot=left;
+ let right=new THREE.Group();right.position.set(.55,4.55,0);c.add(right);cylinder(right,.075,.075,1.45,M.dark,0,-.55,0);sphere(right,.13,M.skin,0,-1.28,-.02);
+ // coat detail buttons
+ for(let y=4.35;y>3.3;y-=.32)sphere(c,.055,M.gold,-.18,y,-.53);
+ c.position.set(-2.2,0,1.1);c.scale.setScalar(.9);character=c;
+ // brick prop
+ brickObj=box(c,.48,.28,.28,M.brick2,.95,4.15,-.5);
+ return c;
+}
+function makeBricks(){let g=new THREE.Group();addWorld(g);for(let i=0;i<5;i++)box(g,.55,.28,.32,M.brick2,-3.2+(i%2)*.58,.15+Math.floor(i/2)*.3,1.5);return g}
+function build(){clearWorld();makeStreet();makeHouse();makeBricks();makeCharacter();camera.position.set(8,7,15);camera.lookAt(0,4,0)}
+const defaultPlan=[
+ {duration:4.5,caption:"IN 1696, HE BRICKED UP HIS WINDOWS",narration:"In 1696, an English homeowner started bricking up his own windows.",action:"brick"},
+ {duration:3,caption:"HIS NEIGHBORS THOUGHT HE WAS MAD",narration:"His neighbors stared. Was he hiding something?",action:"look"},
+ {duration:4,caption:"HE WAS DODGING A WINDOW TAX",narration:"No. He was dodging a brand-new tax on windows.",action:"point"},
+ {duration:5,caption:"THE CROWN NEEDED MONEY",narration:"The Crown needed money after silver was clipped from England's coins.",action:"explain"},
+ {duration:6,caption:"MORE WINDOWS MEANT EXTRA TAX",narration:"Homes with ten or more windows paid extra.",action:"count"},
+ {duration:5,caption:"SO PEOPLE FILLED WINDOWS WITH BRICK",narration:"So homeowners did the math and filled windows with brick.",action:"brick"},
+ {duration:6,caption:"DARKER HOMES. LESS LIGHT.",narration:"The result was darker, stuffier homes.",action:"sad"},
+ {duration:5,caption:"THE TAX ENDED IN 1851",narration:"The tax lasted until 1851, and blocked windows remain visible today.",action:"end"}
+];
+let plan=defaultPlan,playing=false,recording=false,startAt=0,elapsed=0,raf=0,recorder=null,chunks=[],audioURL=null,audioEl=null;
+planEl.value=JSON.stringify(defaultPlan,null,2);
+function sceneAt(t){let sum=0;for(let i=0;i<plan.length;i++){if(t<sum+Number(plan[i].duration))return {i,local:t-sum,scene:plan[i]};sum+=Number(plan[i].duration)}return {i:plan.length-1,local:0,scene:plan[plan.length-1]}}
+function animate(t){let s=sceneAt(t),p=s.scene,lt=s.local;captionEl.textContent=p.caption||"";
+ if(character){let phase=lt/Math.max(.1,Number(p.duration));character.position.x=-2.2+Math.sin(phase*Math.PI*2)*.12;
+  if(armPivot)armPivot.rotation.z=p.action==="brick"?Math.sin(phase*Math.PI*2)*.45:p.action==="point"?-.7:p.action==="sad"?.25:0;
+  if(brickObj){brickObj.position.y=p.action==="brick"?4.15+Math.abs(Math.sin(phase*Math.PI*2))*.4:4.15}
+ }
+ camera.position.x=8+Math.sin(t*.13)*.35;camera.position.y=7+Math.sin(t*.1)*.18;camera.lookAt(0,4,0);
+}
+function renderLoop(now){if(!playing&&!recording)return;let t=(performance.now()-startAt)/1000;let total=plan.reduce((a,b)=>a+Number(b.duration),0);if(t>=total){stopPlayback();return}animate(t);renderer.render(scene,camera);raf=requestAnimationFrame(renderLoop)}
+function stopPlayback(){playing=false;cancelAnimationFrame(raf);if(recording)stopRecording();setStatus("Preview finished.");}
+function startPreview(){if(recording)return;playing=true;elapsed=0;startAt=performance.now();setStatus("Preview playing…");renderLoop(startAt)}
+function stopRecording(){if(recorder&&recorder.state!=="inactive")recorder.stop();recording=false;playing=false;cancelAnimationFrame(raf);document.getElementById('stop').disabled=true;document.getElementById('record').disabled=false}
+async function startRecording(){
+ if(!window.MediaRecorder||!renderer.domElement.captureStream){setStatus("This browser does not support canvas recording. Try current Chrome.");return}
+ const fps=Number(document.getElementById('fps').value),stream=renderer.domElement.captureStream(fps);
+ let tracks=[...stream.getVideoTracks()];
+ if(audioEl&&audioEl.captureStream){try{const ast=audioEl.captureStream();tracks.push(...ast.getAudioTracks())}catch(e){}}
+ const mixed=new MediaStream(tracks);
+ let mime="video/webm;codecs=vp9";if(!MediaRecorder.isTypeSupported(mime))mime="video/webm";
+ try{recorder=new MediaRecorder(mixed,{mimeType:mime,videoBitsPerSecond:Number(document.getElementById('quality').value)})}
+ catch(e){setStatus("Recorder setup failed: "+e.message);return}
+ chunks=[];recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+ recorder.onstop=()=>{const blob=new Blob(chunks,{type:recorder.mimeType||"video/webm"});const url=URL.createObjectURL(blob);const a=document.getElementById('download');a.href=url;a.download="s2-5-short.webm";a.textContent="⬇ Download rendered video ("+(blob.size/1024/1024).toFixed(1)+" MB)";a.style.display="block";setStatus("Render complete. Download your WebM video.")};
+ recorder.start(1000);recording=true;playing=true;startAt=performance.now();document.getElementById('stop').disabled=false;document.getElementById('record').disabled=true;setStatus("Rendering… keep this tab open. Avoid switching apps.");renderLoop(startAt);
+ if(audioEl){audioEl.currentTime=0;audioEl.play().catch(()=>setStatus("Tap the page once, then render again to allow audio playback."))}
+}
+document.getElementById('play').onclick=startPreview;
+document.getElementById('record').onclick=startRecording;
+document.getElementById('stop').onclick=stopRecording;
+document.getElementById('loadPlan').onclick=()=>{try{const v=JSON.parse(planEl.value);if(!Array.isArray(v)||!v.length)throw Error("Plan must be a non-empty array");for(const x of v)if(!(Number(x.duration)>0))throw Error("Each scene needs duration > 0");plan=v;setStatus("Loaded "+plan.length+" scenes · "+plan.reduce((a,b)=>a+Number(b.duration),0)+" seconds.");animate(0);renderer.render(scene,camera)}catch(e){setStatus("Plan error: "+e.message)}};
+document.getElementById('downloadPlan').onclick=()=>{const b=new Blob([planEl.value],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download="scene-plan.json";a.click();URL.revokeObjectURL(u)};
+document.getElementById('audioFile').onchange=e=>{const f=e.target.files[0];if(!f)return;if(audioURL)URL.revokeObjectURL(audioURL);audioURL=URL.createObjectURL(f);audioEl=new Audio(audioURL);audioEl.loop=false;setStatus("Narration loaded: "+f.name)};
+build();animate(0);renderer.render(scene,camera);
+window.addEventListener('resize',()=>{renderer.setSize(540,960,false);renderer.render(scene,camera)});
+</script>
+</body></html>
